@@ -7,6 +7,11 @@ import hashlib
 
 SERVER_FOLDER = "Server"
 
+USER_DATABASE = {
+    "admin": {"password": hashlib.sha256(b"adminpass").hexdigest(), "role": "admin"},
+    "user": {"password": hashlib.sha256(b"userpass").hexdigest(), "role": "user"},
+}
+
 def list_files():
     return os.listdir(SERVER_FOLDER)
 
@@ -22,8 +27,24 @@ def decrypt_file(data, key, iv):
     decrypted_data = unpad(cipher.decrypt(data), AES.block_size)
     return decrypted_data
 
+def authenticate(conn):
+    credentials = conn.recv(1024).decode().split(":")
+    if len(credentials) == 2:
+        username, password_hash = credentials
+        if username in USER_DATABASE and USER_DATABASE[username]["password"] == password_hash:
+            conn.sendall(f"AUTH_SUCCESS:{USER_DATABASE[username]['role']}".encode())
+            return USER_DATABASE[username]["role"]
+    conn.sendall(b"AUTH_FAIL")
+    return None
+
 def handle_client(conn, addr):
     print(f"Connected by {addr}")
+    role = authenticate(conn)
+    if not role:
+        print(f"Authentication failed for {addr}")
+        conn.close()
+        return
+
     while True:
         request = conn.recv(1024).decode()
         if request == "1":
@@ -39,7 +60,7 @@ def handle_client(conn, addr):
                 conn.sendall(key + iv + encrypted_data)
             else:
                 conn.sendall(b"File not found")
-        elif request.startswith("UPLOAD"):
+        elif request.startswith("UPLOAD") and role == "admin":
             filename = request.split()[1]
             data = conn.recv(4096)
             key, iv, file_data = data[:16], data[16:32], data[32:]

@@ -2,6 +2,7 @@ import os
 import socket
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+import hashlib
 
 CLIENT_FOLDER = "Client"
 
@@ -28,8 +29,24 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((server_ip, server_port))
 
+        # Authentication
+        username = input("Enter username: ")
+        password = input("Enter password: ")
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        s.sendall(f"{username}:{password_hash}".encode())
+        auth_response = s.recv(1024).decode()
+        if auth_response.startswith("AUTH_FAIL"):
+            print("Authentication failed.")
+            return
+
+        role = auth_response.split(":")[1]
+
         while True:
-            choice = input("1. Download\n2. Upload\nChoose an option: ")
+            if role == "admin":
+                choice = input("1. Download\n2. Upload\n3. Exit\nChoose an option: ")
+            else:
+                choice = input("1. Download\n3. Exit\nChoose an option: ")
+
             if choice == "1":
                 s.sendall(b"1")
                 files = s.recv(1024).decode().split("\n")
@@ -46,7 +63,7 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
                     with open(os.path.join(CLIENT_FOLDER, filename), 'wb') as f:
                         f.write(decrypted_data)
                     print(f"Downloaded {filename}")
-            elif choice == "2":
+            elif choice == "2" and role == "admin":
                 files = list_files()
                 for file in files:
                     print(file)
@@ -61,9 +78,12 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
                     print(f"Uploaded {filename}")
                 else:
                     print("File not found in client folder.")
-            elif choice == "exit":
+            elif choice == "3":
                 s.sendall(b"exit")
+                print("Exiting...")
                 break
+            else:
+                print("Invalid option. Please choose again.")
 
 
 if __name__ == "__main__":
