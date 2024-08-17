@@ -3,13 +3,13 @@ import socket
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import hashlib
+from urllib.parse import quote, unquote
 
 CLIENT_FOLDER = "Client"
 
-
 def list_files():
-    return os.listdir(CLIENT_FOLDER)
-
+    files = os.listdir(CLIENT_FOLDER)
+    return [f for f in files if f != ".DS_Store"]
 
 def encrypt_file(filepath, key, iv):
     cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -18,14 +18,14 @@ def encrypt_file(filepath, key, iv):
     encrypted_data = cipher.encrypt(pad(data, AES.block_size))
     return encrypted_data
 
-
 def decrypt_file(data, key, iv):
     cipher = AES.new(key, AES.MODE_CBC, iv)
     decrypted_data = unpad(cipher.decrypt(data), AES.block_size)
     return decrypted_data
 
-
 def start_client(server_ip="127.0.0.1", server_port=65432):
+    if not os.path.exists(CLIENT_FOLDER):
+        os.makedirs(CLIENT_FOLDER)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((server_ip, server_port))
 
@@ -52,9 +52,17 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
                 files = s.recv(1024).decode().split("\n")
                 for file in files:
                     print(file)
-                filename = input("Enter the filename to download: ")
-                s.sendall(f"DOWNLOAD {filename}".encode())
-                data = s.recv(4096)
+                filename = input("Enter the filename to download: ").strip()
+                filename_encoded = quote(filename)
+                s.sendall(f"DOWNLOAD {filename_encoded}".encode())
+                data_length = int.from_bytes(s.recv(16), 'big')
+                data = b''
+                while len(data) < data_length + 32:
+                    chunk = s.recv(min(4096, data_length + 32 - len(data)))
+                    if not chunk:
+                        break
+                    data += chunk
+
                 if data.startswith(b"File not found"):
                     print("File not found on server.")
                 else:
@@ -67,14 +75,16 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
                 files = list_files()
                 for file in files:
                     print(file)
-                filename = input("Enter the filename to upload: ")
+                filename = input("Enter the filename to upload: ").strip()
+                filename_encoded = quote(filename)
                 filepath = os.path.join(CLIENT_FOLDER, filename)
                 if os.path.exists(filepath):
                     key = os.urandom(16)
                     iv = os.urandom(16)
                     encrypted_data = encrypt_file(filepath, key, iv)
-                    s.sendall(f"UPLOAD {filename}".encode())
-                    s.sendall(key + iv + encrypted_data)
+                    file_length = len(encrypted_data)
+                    s.sendall(f"UPLOAD {filename_encoded}".encode())
+                    s.sendall(file_length.to_bytes(16, 'big') + key + iv + encrypted_data)
                     print(f"Uploaded {filename}")
                 else:
                     print("File not found in client folder.")
@@ -84,7 +94,6 @@ def start_client(server_ip="127.0.0.1", server_port=65432):
                 break
             else:
                 print("Invalid option. Please choose again.")
-
 
 if __name__ == "__main__":
     start_client()
